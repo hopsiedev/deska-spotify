@@ -77,21 +77,47 @@ async function onCommand({ id, c, a }) {
 
 function connect() {
   log('conectando al relé…');
-  ws = new WebSocket(wsUrl);
-  ws.onopen = () => { log('conectado'); backoff = 1000; lastSent = null; sentCover = ''; pushState(true); };
-  ws.onmessage = (ev) => {
-    try { const m = JSON.parse(String(ev.data)); if (m.t === 'cmd') onCommand(m); } catch { /* mensaje ajeno */ }
-  };
-  const retry = () => {
-    if (!ws) return;
-    ws = null;
+  const s = new WebSocket(wsUrl);
+  ws = s;
+  let lastRx = Date.now();
+  let pinger = null;
+  let dropped = false;
+  const connTimer = setTimeout(() => drop('no se pudo conectar'), 10000);
+
+  // Pasa a "desconectado" una sola vez, aunque el socket viejo tarde en avisar (internet caído).
+  const drop = (why) => {
+    if (dropped) return;
+    dropped = true;
+    clearTimeout(connTimer);
+    clearInterval(pinger);
+    if (ws === s) ws = null;
+    try { s.close(); } catch { /* ya cerrado */ }
     const wait = backoff + Math.random() * 500;
     backoff = Math.min(backoff * 2, 30000);
-    log(`desconectado; reintento en ${Math.round(wait / 1000)} s`);
+    log(`desconectado (${why}); reintento en ${Math.round(wait / 1000)} s`);
     setTimeout(connect, wait);
   };
-  ws.onclose = retry;
-  ws.onerror = () => { try { ws.close(); } catch { /* ya cerrado */ } };
+
+  s.onopen = () => {
+    clearTimeout(connTimer);
+    log('conectado');
+    backoff = 1000;
+    lastRx = Date.now();
+    lastSent = null;
+    sentCover = '';
+    pushState(true);
+    // Latido cada 10 s; si el relé no responde en 30 s la conexión está muerta.
+    pinger = setInterval(() => {
+      if (Date.now() - lastRx > 30000) return drop('sin respuesta del relé');
+      try { s.send('ping'); } catch { drop('error al enviar'); }
+    }, 10000);
+  };
+  s.onmessage = (ev) => {
+    lastRx = Date.now();
+    try { const m = JSON.parse(String(ev.data)); if (m.t === 'cmd') onCommand(m); } catch { /* "pong" u otro mensaje */ }
+  };
+  s.onclose = () => drop('cerrado');
+  s.onerror = () => drop('error');
 }
 
 connect();

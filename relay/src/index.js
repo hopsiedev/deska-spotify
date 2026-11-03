@@ -69,6 +69,13 @@ export class Hub extends DurableObject {
   hits = [];
   lastTouch = 0;
 
+  constructor(ctx, env) {
+    super(ctx, env);
+    // Latido: el cliente envía "ping" y el relé responde "pong" sin despertar al objeto.
+    // Así ambos lados detectan una conexión muerta (p. ej. tras caerse el internet).
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+  }
+
   async auth(k) {
     const hash = await sha256Hex(k);
     const stored = await this.ctx.storage.get('h');

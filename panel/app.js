@@ -126,22 +126,37 @@ function openWs() {
   try { s = new WebSocket(`wss://${HOST}/ws/p/${pair.id}?k=${pair.secret}`); } catch { return; }
   sock = s;
   wsLive = false;
+  let lastRx = Date.now();
+  let dropped = false;
   clearTimeout(watchdog);
-  watchdog = setTimeout(() => { if (!wsLive) { try { s.close(); } catch { /* ya cerrado */ } } }, 5000);
-  s.onmessage = (e) => {
-    if (!wsLive) { wsLive = true; wsFails = 0; stopPoll(); }
-    try { handle(JSON.parse(e.data)); } catch { /* mensaje ajeno */ }
-  };
-  s.onclose = () => {
+  watchdog = setTimeout(() => { if (!wsLive) drop(); }, 5000);
+
+  // Una conexión muerta (p. ej. se cayó el internet) no avisa: se detecta con el latido y se vuelve al sondeo.
+  const drop = () => {
+    if (dropped) return;
+    dropped = true;
+    clearInterval(pinger);
+    clearTimeout(watchdog);
     if (sock === s) sock = null;
     wsLive = false;
-    clearTimeout(watchdog);
+    try { s.close(); } catch { /* ya cerrado */ }
     startPoll();
     wsFails++;
     clearTimeout(retryTimer);
     retryTimer = setTimeout(openWs, Math.min(2000 * 2 ** Math.min(wsFails, 5), 60000));
   };
-  s.onerror = () => { try { s.close(); } catch { /* ya cerrado */ } };
+  const pinger = setInterval(() => {
+    if (Date.now() - lastRx > 25000) return drop();
+    try { if (s.readyState === 1) s.send('ping'); } catch { drop(); }
+  }, 10000);
+
+  s.onmessage = (e) => {
+    lastRx = Date.now();
+    if (!wsLive) { wsLive = true; wsFails = 0; stopPoll(); }
+    try { handle(JSON.parse(e.data)); } catch { /* "pong" u otro mensaje */ }
+  };
+  s.onclose = drop;
+  s.onerror = drop;
 }
 
 function disconnect() {
@@ -161,12 +176,13 @@ async function cmd(c, a = '') {
     });
     sock.send(JSON.stringify({ t: 'cmd', id, c, a }));
     const r = await wait;
-    say(r.ok ? '' : r.out === 'offline' ? 'Tu PC no está conectado' : r.out);
+    say(r.ok ? '' : r.out === 'offline' ? 'Tu PC no está conectado' : r.out === 'timeout' ? 'Tu PC no responde; reconectando…' : r.out);
+    if (r.out === 'timeout') reconnect();
     return r;
   }
   try {
     const r = await (await fetch(`${RELAY}/cmd/${pair.id}?k=${pair.secret}&c=${c}&a=${encodeURIComponent(a)}`)).json();
-    say(r.ok ? '' : r.out === 'offline' ? 'Tu PC no está conectado' : r.out);
+    say(r.ok ? '' : r.out === 'offline' ? 'Tu PC no está conectado' : r.out === 'timeout' ? 'Tu PC no responde; reconectando…' : r.out);
     setTimeout(poll, 500);
     return r;
   } catch {
@@ -261,6 +277,7 @@ $('seek').onchange = async () => {
 // Botón redondo de la fila en Extras: reproduce o pausa.
 deska.on('extras.control', () => { if (online) { setPlaying(!playing); posAt = Date.now(); cmd('toggle'); } });
 // Con el panel oculto se cierra la conexión para no gastar peticiones.
+window.addEventListener('online', () => reconnect()); // volvió el internet
 deska.on('visibility', () => { if (deska.visible === false) disconnect(); else reconnect(); });
 
 deska.ready().then(async () => {
