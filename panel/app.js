@@ -1,4 +1,4 @@
-import { RELAY, REPO, REF } from './relay.js';
+import { RELAY, REPO, REF, VERSION } from './relay.js';
 
 const HOST = new URL(RELAY).host;
 const $ = (id) => document.getElementById(id);
@@ -246,6 +246,8 @@ function tick() {
   }
 }
 setInterval(tick, 250);
+// Con el WebSocket vivo no llegan avisos si tu PC se cae sin cerrar su conexión: se comprueba cada 20 s.
+setInterval(() => { if (wsLive && deska.visible !== false) poll(); }, 20000);
 
 $('cover').onload = () => { $('cover').hidden = false; $('coverPh').hidden = true; };
 $('cover').onerror = () => { $('cover').hidden = true; $('coverPh').hidden = false; };
@@ -281,6 +283,7 @@ window.addEventListener('online', () => reconnect()); // volvió el internet
 deska.on('visibility', () => { if (deska.visible === false) disconnect(); else reconnect(); });
 
 deska.ready().then(async () => {
+  $('ver').textContent = `v${VERSION}`;
   pair = await loadPair();
   renderPair();
   setView();

@@ -97,15 +97,25 @@ export class Hub extends DurableObject {
     await this.ctx.storage.deleteAll();
   }
 
-  online() { return this.ctx.getWebSockets('c').length > 0; }
-
-  async snapshot() {
-    const st = (await this.ctx.storage.get('state')) || { s: { run: false }, rev: 0 };
-    return { t: 'state', online: this.online(), rev: st.rev, s: st.s };
+  // El companion envía "ping" cada 10 s; si lleva más de 40 s callado se considera caído (apagado, sin internet…).
+  alive(w) {
+    const ts = this.ctx.getWebSocketAutoResponseTimestamp(w);
+    let since = 0;
+    try { since = w.deserializeAttachment()?.t || 0; } catch { /* sin adjunto */ }
+    return Date.now() - Math.max(ts ? ts.getTime() : 0, since) < 40000;
   }
 
-  async broadcast(extra) {
-    const msg = JSON.stringify(extra || (await this.snapshot()));
+  online() { return this.ctx.getWebSockets('c').some((w) => this.alive(w)); }
+
+  // `closing`: socket que se está cerrando; sigue figurando en getWebSockets() y no debe contar como conectado.
+  async snapshot(closing) {
+    const st = (await this.ctx.storage.get('state')) || { s: { run: false }, rev: 0 };
+    const online = this.ctx.getWebSockets('c').some((w) => w !== closing && this.alive(w));
+    return { t: 'state', online, rev: st.rev, s: st.s };
+  }
+
+  async broadcast(extra, closing) {
+    const msg = JSON.stringify(extra || (await this.snapshot(closing)));
     for (const w of this.ctx.getWebSockets('p')) { try { w.send(msg); } catch { /* socket cerrado */ } }
   }
 
@@ -136,6 +146,7 @@ export class Hub extends DurableObject {
       if (kind === 'ws/c') {
         for (const w of this.ctx.getWebSockets('c')) { try { w.close(4000, 'replaced'); } catch { /* ya cerrado */ } }
         this.ctx.acceptWebSocket(server, ['c']);
+        server.serializeAttachment({ t: Date.now() });
         await this.broadcast();
       } else {
         const panels = this.ctx.getWebSockets('p');
@@ -205,8 +216,10 @@ export class Hub extends DurableObject {
   }
 
   async webSocketClose(ws) {
+    let wasCompanion = false;
+    try { wasCompanion = this.ctx.getTags(ws).includes('c'); } catch { /* socket ya liberado */ }
     try { ws.close(); } catch { /* ya cerrado */ }
-    if (this.ctx.getTags(ws).includes('c')) await this.broadcast();
+    if (wasCompanion) await this.broadcast(null, ws);
   }
 
   async webSocketError(ws) { await this.webSocketClose(ws); }

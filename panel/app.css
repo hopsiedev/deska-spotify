@@ -56,3 +56,4 @@ button.ghost { background: none; color: var(--deska-text, #ececf0); border: 1px 
 .wait { font-size: 12px; color: var(--deska-text-secondary, #aaa); }
 .wait::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--deska-accent, #1db954); animation: blink 1.2s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .2; } }
+.ver { margin-top: auto; font-size: 10px; color: var(--deska-text-tertiary, #888); text-align: right; }
