@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "spotify-desktop-control",
+  "name": "Spotify Control",
+  "version": "1.0.0",
+  "description": "Controla tu Spotify de escritorio: portada, play/pausa, siguiente, volumen y línea de tiempo.",
+  "author": "hopsiedev",
+  "icon": "icon.svg",
+  "color": "#1db954",
+  "category": "media",
+  "permissions": ["clipboard-write"],
+  "network": ["deska-spotify-relay.xhopsiedev.workers.dev"],
+  "sdk": 1,
+  "contributes": {
+    "panel": { "entry": "index.html", "scope": "global", "size": { "width": 360, "height": 300 } },
+    "extras": { "title": "Spotify" }
+  }
+}

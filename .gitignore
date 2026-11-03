@@ -1,0 +1,20 @@
+node_modules/
+.wrangler/
+.dev.vars
+
+# Secretos y archivos temporales del companion / puente de desarrollo
+.bridge-token
+.bridge-pids
+.tunnel.log
+.cover.img
+config.json
+companion.log
+
+# Herramientas locales de desarrollo (túnel personal): no forman parte del proyecto público
+/spotify-panel/
+/spotify-bridge.mjs
+/spotify-worker.ps1
+/spotify-control.ps1
+/start-bridge.ps1
+/stop-bridge.ps1
+/tmp/
