@@ -18,3 +18,4 @@ companion.log
 /start-bridge.ps1
 /stop-bridge.ps1
 /tmp/
+dist/
