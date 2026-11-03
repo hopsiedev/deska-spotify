@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "spotify-desktop-control",
   "name": "Spotify Control",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Controla tu Spotify de escritorio: portada, play/pausa, siguiente, volumen y línea de tiempo.",
   "author": "hopsiedev",
   "icon": "icon.svg",

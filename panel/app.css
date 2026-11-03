@@ -45,3 +45,4 @@ button.ghost { background: none; color: inherit; border: 1px solid #8884; font-w
 .wait { font-size: 12px; opacity: .7; }
 .wait::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #1db954; animation: blink 1.2s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .2; } }
+#player[hidden], #pair[hidden] { display: none; }

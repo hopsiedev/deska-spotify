@@ -74,13 +74,22 @@ $('newCode').onclick = async () => {
 $('setup').onclick = () => { showPair = true; setView(); };
 $('closePair').onclick = () => { showPair = false; setView(); };
 
-// ---------- conexión con el relé (WebSocket; si el sandbox no lo permite, sondeo) ----------
+// ---------- conexión con el relé ----------
+// Base: sondeo cada pocos segundos (siempre funciona). Mejora: WebSocket; en cuanto llega su
+// primer mensaje se deja de sondear, y si se cae o se cuelga se vuelve al sondeo.
 let sock = null;
+let wsLive = false;
 let wsFails = 0;
 let pollTimer = null;
 let retryTimer = null;
+let watchdog = null;
+let pollTicks = 0;
 let seq = 0;
 const acks = new Map();
+
+function setDiag(t) {
+  $('waiting').textContent = t ? `Esperando a tu PC… (${t})` : 'Esperando a tu PC…';
+}
 
 function handle(m) {
   if (m.t === 'ack') {
@@ -89,45 +98,62 @@ function handle(m) {
   } else if (m.t === 'state') apply(m);
 }
 
+async function poll() {
+  try {
+    const r = await fetch(`${RELAY}/state/${pair.id}?k=${pair.secret}`);
+    if (!r.ok) return setDiag(`el servidor respondió ${r.status}`);
+    const m = await r.json();
+    setDiag('');
+    apply(m);
+  } catch (e) {
+    setDiag(`sin respuesta del servidor: ${(e && e.message) || e}`);
+  }
+}
+function startPoll() {
+  if (pollTimer) return;
+  poll();
+  pollTimer = setInterval(() => {
+    if (deska.visible === false) return;
+    if (deska.idle && ++pollTicks % 4) return; // ventana sin foco: más espaciado
+    poll();
+  }, 2500);
+}
+function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
+
 function openWs() {
-  if (sock || !pair || !deska.visible) return;
+  if (sock || !pair || deska.visible === false) return;
   let s;
-  try { s = new WebSocket(`wss://${HOST}/ws/p/${pair.id}?k=${pair.secret}`); } catch { wsFails++; return fallback(); }
+  try { s = new WebSocket(`wss://${HOST}/ws/p/${pair.id}?k=${pair.secret}`); } catch { return; }
   sock = s;
-  s.onopen = () => { wsFails = 0; stopPoll(); };
-  s.onmessage = (e) => { try { handle(JSON.parse(e.data)); } catch { /* mensaje ajeno */ } };
+  wsLive = false;
+  clearTimeout(watchdog);
+  watchdog = setTimeout(() => { if (!wsLive) { try { s.close(); } catch { /* ya cerrado */ } } }, 5000);
+  s.onmessage = (e) => {
+    if (!wsLive) { wsLive = true; wsFails = 0; stopPoll(); }
+    try { handle(JSON.parse(e.data)); } catch { /* mensaje ajeno */ }
+  };
   s.onclose = () => {
     if (sock === s) sock = null;
+    wsLive = false;
+    clearTimeout(watchdog);
+    startPoll();
     wsFails++;
-    if (wsFails >= 3) fallback();
     clearTimeout(retryTimer);
-    retryTimer = setTimeout(openWs, Math.min(1000 * 2 ** Math.min(wsFails, 5), 30000));
+    retryTimer = setTimeout(openWs, Math.min(2000 * 2 ** Math.min(wsFails, 5), 60000));
   };
   s.onerror = () => { try { s.close(); } catch { /* ya cerrado */ } };
 }
 
-async function poll() {
-  try {
-    const r = await fetch(`${RELAY}/state/${pair.id}?k=${pair.secret}`);
-    if (r.ok) apply(await r.json());
-  } catch { /* sin red: se reintenta */ }
-}
-function fallback() {
-  if (pollTimer) return;
-  poll();
-  pollTimer = setInterval(() => { if (deska.visible && !deska.idle) poll(); }, 3000);
-}
-function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
-
 function disconnect() {
   clearTimeout(retryTimer);
+  clearTimeout(watchdog);
   stopPoll();
-  if (sock) { const s = sock; sock = null; try { s.close(); } catch { /* ya cerrado */ } }
+  if (sock) { const s = sock; sock = null; wsLive = false; try { s.close(); } catch { /* ya cerrado */ } }
 }
-function reconnect() { disconnect(); wsFails = 0; openWs(); }
+function reconnect() { disconnect(); wsFails = 0; startPoll(); openWs(); }
 
 async function cmd(c, a = '') {
-  if (sock && sock.readyState === 1) {
+  if (sock && wsLive && sock.readyState === 1) {
     const id = `p${(++seq).toString(36)}${randId(4)}`;
     const wait = new Promise((resolve) => {
       acks.set(id, resolve);
@@ -141,6 +167,7 @@ async function cmd(c, a = '') {
   try {
     const r = await (await fetch(`${RELAY}/cmd/${pair.id}?k=${pair.secret}&c=${c}&a=${encodeURIComponent(a)}`)).json();
     say(r.ok ? '' : r.out === 'offline' ? 'Tu PC no está conectado' : r.out);
+    setTimeout(poll, 500);
     return r;
   } catch {
     say('Sin conexión con el servidor');
@@ -199,7 +226,7 @@ function tick() {
   const key = `${state}|${playing}|${Math.round(now / 5)}`;
   if (key !== lastExtras) {
     lastExtras = key;
-    deska.extras.set({ state, progress: online && dur ? now / dur : null, control: online ? (playing ? 'pause' : 'play') : null }).catch(() => {});
+    try { deska.extras.set({ state, progress: online && dur ? now / dur : null, control: online ? (playing ? 'pause' : 'play') : null }).catch(() => {}); } catch { /* sin Extras */ }
   }
 }
 setInterval(tick, 250);
@@ -234,11 +261,11 @@ $('seek').onchange = async () => {
 // Botón redondo de la fila en Extras: reproduce o pausa.
 deska.on('extras.control', () => { if (online) { setPlaying(!playing); posAt = Date.now(); cmd('toggle'); } });
 // Con el panel oculto se cierra la conexión para no gastar peticiones.
-deska.on('visibility', () => { if (deska.visible) reconnect(); else disconnect(); });
+deska.on('visibility', () => { if (deska.visible === false) disconnect(); else reconnect(); });
 
 deska.ready().then(async () => {
   pair = await loadPair();
   renderPair();
   setView();
-  openWs();
+  reconnect();
 });
