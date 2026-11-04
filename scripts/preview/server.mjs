@@ -47,7 +47,7 @@ http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   const send = (body, type, status = 200) => { res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' }); res.end(body); };
   if (u.pathname === '/__deska/sdk.js') return send(sdk, 'text/javascript');
-  if (u.pathname === '/relay.js') return send(`export const RELAY = 'http://127.0.0.1:${PORT}/mock'; export const REPO = 'hopsiedev/deska-spotify'; export const REF = 'main';`, 'text/javascript');
+  if (u.pathname === '/relay.js') return send(`export const RELAY = 'http://127.0.0.1:${PORT}/mock'; export const REPO = 'hopsiedev/deska-spotify'; export const REF = 'v1.0.6'; export const VERSION = '1.0.6'; export const INSTALLER_HASH = '2DAF9CEE8C2203404A1FBF69ADD40169096AE5863FF817E39A8EEF8B0C167B0D';`, 'text/javascript');
   const m = u.pathname.match(/^\/mock\/(state|cover)\/([a-z0-9]+)$/);
   if (m) {
     const scene = m[2].replace(/0+$/, '');

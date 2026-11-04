@@ -1,16 +1,24 @@
 # Instala el companion de Spotify para Deska (Windows). Sin permisos de administrador, sin requisitos previos.
-#   $env:DESKA_SPOTIFY_CODE='<código del panel>'; irm https://raw.githubusercontent.com/hopsiedev/deska-spotify/main/installers/install.ps1 | iex
+#   $env:DESKA_SPOTIFY_CODE='<código>'; irm https://raw.githubusercontent.com/hopsiedev/deska-spotify/v1.0.6/installers/install.ps1 | iex
+param([string]$Code = $env:DESKA_SPOTIFY_CODE)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $Relay = if ($env:DESKA_SPOTIFY_RELAY) { $env:DESKA_SPOTIFY_RELAY } else { 'https://deska-spotify-relay.xhopsiedev.workers.dev' }
 $Repo = 'hopsiedev/deska-spotify'
-$Ref = 'main'
+$Ref = 'v1.0.6'
 $NodeMajor = '22'
-$Files = @('companion.mjs', 'adapters/windows.mjs', 'spotify-worker.ps1', 'package.json')
 
-$code = $env:DESKA_SPOTIFY_CODE
+# Archivos del companion fijados a un tag con SHA-256 verificado individualmente
+$Files = @{
+  'companion.mjs'        = 'CB4C7F9A819B9A53040614A7790DD59D0D61701EBB11E1415E703332FEA54404'
+  'adapters/windows.mjs' = 'E378052FC6D9D8551765AE3EC93646A61BF5DDD32D8B7AF2F5BAF4F979399BCE'
+  'spotify-worker.ps1'   = 'FFBFADE83BD06481E9685C8BD22039BC5453B28245B575C6BF16DD0FD8F5B4F3'
+  'package.json'         = 'A34C80CFE1239C1818DE09A6D5773C4EB487F3C5C9F62069BD180BDC1CCDE3D3'
+}
+
+$code = $Code
 if (-not $code) { $code = Read-Host 'Código de emparejamiento (lo muestra el panel de Spotify en Deska)' }
 $code = $code.Trim()
 if ($code -notmatch '^([a-z0-9]{16,32})\.([a-f0-9]{32,64})$') { throw 'El código de emparejamiento no es válido. Cópialo de nuevo desde el panel.' }
@@ -48,11 +56,21 @@ if (-not (Test-Path $nodeExe)) {
   Remove-Item $tmp, $zip -Recurse -Force
 }
 
-# 2) Companion
-foreach ($f in $Files) {
+# 2) Companion verificado con SHA-256 archivo por archivo
+foreach ($entry in $Files.GetEnumerator()) {
+  $f = $entry.Key
+  $expectedHash = $entry.Value
   $dest = Join-Path $dir $f
-  if ($env:DESKA_SPOTIFY_SRC) { Copy-Item (Join-Path $env:DESKA_SPOTIFY_SRC $f) $dest -Force }
-  else { Invoke-WebRequest "https://raw.githubusercontent.com/$Repo/$Ref/companion/$f" -OutFile $dest -UseBasicParsing }
+  if ($env:DESKA_SPOTIFY_SRC) {
+    Copy-Item (Join-Path $env:DESKA_SPOTIFY_SRC $f) $dest -Force
+  } else {
+    Invoke-WebRequest "https://raw.githubusercontent.com/$Repo/$Ref/companion/$f" -OutFile $dest -UseBasicParsing
+  }
+  $actualHash = (Get-FileHash $dest -Algorithm SHA256).Hash.ToUpper()
+  if ($actualHash -ne $expectedHash.ToUpper()) {
+    Remove-Item $dest -Force -ErrorAction SilentlyContinue
+    throw "Verificación SHA-256 fallida para $f (esperado: $expectedHash, obtenido: $actualHash)"
+  }
 }
 [IO.File]::WriteAllText((Join-Path $dir 'config.json'), (@{ relay = $Relay; id = $id; secret = $secret } | ConvertTo-Json), $utf8)
 

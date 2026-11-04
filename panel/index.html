@@ -14,7 +14,7 @@
         <div id="title" class="title">Spotify</div>
         <div id="artist" class="artist">—</div>
       </div>
-      <button id="setup" class="gear" title="Conectar otro PC" aria-label="Conectar otro PC">⋯</button>
+      <button id="setup" class="gear" title="Conectar o desinstalar companion" aria-label="Conectar o desinstalar companion">⋯</button>
     </section>
     <div class="tl">
       <span id="tPos">0:00</span>
@@ -35,18 +35,24 @@
 
   <section id="pair" class="card" hidden>
     <h1 id="pairTitle">Conecta tu PC</h1>
-    <p id="pairText">Pega este comando en una terminal de tu PC. Instala un programa pequeño que controla tu Spotify de escritorio.</p>
-    <div class="tabs">
-      <button id="tabWin" type="button">Windows</button>
-      <button id="tabMac" type="button">macOS</button>
+    <div class="notice">
+      Este comando instala un programa en tu PC que arranca automáticamente con la sesión. Para comunicarse con Deska, el título, artista y portada pasan por tu servidor (relé).
     </div>
+    <p id="pairText">Pega este comando en PowerShell en tu PC con Windows:</p>
     <pre id="cmdBox"></pre>
     <div class="row">
       <button id="copy" type="button">Copiar comando</button>
-      <button id="newCode" type="button" class="ghost" title="Genera otro código; el PC conectado dejará de funcionar">Nuevo código</button>
+      <button id="newCode" type="button" class="ghost" title="Genera otro código y revoca el PC conectado">Nuevo código</button>
       <button id="closePair" type="button" class="ghost" hidden>Cerrar</button>
     </div>
     <div id="waiting" class="wait">Esperando a tu PC…</div>
+
+    <div class="uninstall-box">
+      <div class="uninstall-title">¿Cómo desinstalarlo?</div>
+      <p class="uninstall-desc">Para quitar el programa de tu PC, ejecuta este comando en PowerShell:</p>
+      <pre id="uninstBox"></pre>
+      <button id="copyUninst" type="button" class="ghost">Copiar comando de desinstalación</button>
+    </div>
   </section>
 
   <div id="msg" class="msg"></div>

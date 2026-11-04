@@ -1,4 +1,4 @@
-import { RELAY, REPO, REF, VERSION } from './relay.js';
+import { RELAY, REPO, REF, VERSION, INSTALLER_HASH } from './relay.js';
 
 const HOST = new URL(RELAY).host;
 const $ = (id) => document.getElementById(id);
@@ -8,6 +8,7 @@ let online = false;
 let showPair = false;
 let playing = false;
 let coverKey = '';
+let currentCoverUrl = '';
 let lastTrack = '';
 let pos = 0;
 let dur = 0;
@@ -16,7 +17,6 @@ let seeking = false;
 let volTimer = null;
 let volHold = 0;
 let lastExtras = '';
-let tab = /Mac/i.test(navigator.userAgent) ? 'mac' : 'win';
 
 const say = (t) => { $('msg').textContent = t || ''; };
 
@@ -33,18 +33,18 @@ async function loadPair() {
   return p;
 }
 
-const raw = (f) => `https://raw.githubusercontent.com/${REPO}/${REF}/installers/${f}`;
 function command() {
   const code = `${pair.id}.${pair.secret}`;
-  return tab === 'mac'
-    ? `curl -fsSL ${raw('install.sh')} | DESKA_SPOTIFY_CODE='${code}' bash`
-    : `$env:DESKA_SPOTIFY_CODE='${code}'; irm ${raw('install.ps1')} | iex`;
+  return `$env:DESKA_SPOTIFY_CODE='${code}'; $f="$env:TEMP\\deska-install.ps1"; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest 'https://raw.githubusercontent.com/${REPO}/${REF}/installers/install.ps1' -OutFile $f -UseBasicParsing; if ((Get-FileHash $f -Algorithm SHA256).Hash -ne '${INSTALLER_HASH}') { Remove-Item $f -Force; throw 'SHA-256 del instalador no coincide' }; & $f; Remove-Item $f -Force`;
+}
+
+function uninstCommand() {
+  return `irm https://raw.githubusercontent.com/${REPO}/${REF}/installers/uninstall.ps1 | iex`;
 }
 
 function renderPair() {
-  $('tabWin').classList.toggle('on', tab === 'win');
-  $('tabMac').classList.toggle('on', tab === 'mac');
   $('cmdBox').textContent = command();
+  $('uninstBox').textContent = uninstCommand();
 }
 
 function setView() {
@@ -53,30 +53,58 @@ function setView() {
   $('player').hidden = !online;
   $('closePair').hidden = !online;
   $('waiting').hidden = online;
-  $('pairTitle').textContent = online ? 'Conectar otro PC' : (lastTrack ? 'Tu PC está desconectado' : 'Conecta tu PC');
+  $('pairTitle').textContent = online ? 'Configuración del PC' : (lastTrack ? 'Tu PC está desconectado' : 'Conecta tu PC');
 }
 
-$('tabWin').onclick = () => { tab = 'win'; renderPair(); };
-$('tabMac').onclick = () => { tab = 'mac'; renderPair(); };
 $('copy').onclick = async () => {
-  try { await deska.clipboard.write(command()); say('Comando copiado: pégalo en tu terminal'); }
-  catch { say('No se pudo copiar; selecciona el texto manualmente'); }
+  try {
+    await deska.clipboard.write(command());
+    say('Comando copiado: pégalo en PowerShell en tu PC');
+  } catch {
+    say('No se pudo copiar; selecciona el texto manualmente');
+  }
 };
+
+$('copyUninst').onclick = async () => {
+  try {
+    await deska.clipboard.write(uninstCommand());
+    say('Comando de desinstalación copiado al portapapeles');
+  } catch {
+    say('No se pudo copiar; selecciona el texto manualmente');
+  }
+};
+
 $('newCode').onclick = async () => {
+  const old = pair;
+  if (old?.id && old?.secret) {
+    try {
+      await fetch(`${RELAY}/revoke/${old.id}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${old.secret}` }
+      });
+    } catch {
+      // Ignorar fallo de red si el relé o internet no están disponibles
+    }
+  }
   pair = { id: randId(20), secret: randHex(16) };
   await deska.storage.set('pair', pair);
   online = false;
   lastTrack = '';
+  coverKey = '';
+  if (currentCoverUrl) {
+    URL.revokeObjectURL(currentCoverUrl);
+    currentCoverUrl = '';
+  }
   renderPair();
   setView();
   reconnect();
 };
+
 $('setup').onclick = () => { showPair = true; setView(); };
 $('closePair').onclick = () => { showPair = false; setView(); };
 
 // ---------- conexión con el relé ----------
-// Base: sondeo cada pocos segundos (siempre funciona). Mejora: WebSocket; en cuanto llega su
-// primer mensaje se deja de sondear, y si se cae o se cuelga se vuelve al sondeo.
+// Base: sondeo cada pocos segundos. Mejora: WebSocket con auth en el primer frame.
 let sock = null;
 let wsLive = false;
 let wsFails = 0;
@@ -99,8 +127,11 @@ function handle(m) {
 }
 
 async function poll() {
+  if (!pair) return;
   try {
-    const r = await fetch(`${RELAY}/state/${pair.id}?k=${pair.secret}`);
+    const r = await fetch(`${RELAY}/state/${pair.id}`, {
+      headers: { Authorization: `Bearer ${pair.secret}` }
+    });
     if (!r.ok) return setDiag(`el servidor respondió ${r.status}`);
     const m = await r.json();
     setDiag('');
@@ -109,12 +140,13 @@ async function poll() {
     setDiag(`sin respuesta del servidor: ${(e && e.message) || e}`);
   }
 }
+
 function startPoll() {
   if (pollTimer) return;
   poll();
   pollTimer = setInterval(() => {
     if (deska.visible === false) return;
-    if (deska.idle && ++pollTicks % 4) return; // ventana sin foco: más espaciado
+    if (deska.idle && ++pollTicks % 4) return;
     poll();
   }, 2500);
 }
@@ -123,15 +155,14 @@ function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
 function openWs() {
   if (sock || !pair || deska.visible === false) return;
   let s;
-  try { s = new WebSocket(`wss://${HOST}/ws/p/${pair.id}?k=${pair.secret}`); } catch { return; }
+  try { s = new WebSocket(`wss://${HOST}/ws/p/${pair.id}`); } catch { return; }
   sock = s;
   wsLive = false;
   let lastRx = Date.now();
   let dropped = false;
   clearTimeout(watchdog);
-  watchdog = setTimeout(() => { if (!wsLive) drop(); }, 5000);
+  watchdog = setTimeout(() => { if (!wsLive) drop(); }, 6000);
 
-  // Una conexión muerta (p. ej. se cayó el internet) no avisa: se detecta con el latido y se vuelve al sondeo.
   const drop = () => {
     if (dropped) return;
     dropped = true;
@@ -139,21 +170,37 @@ function openWs() {
     clearTimeout(watchdog);
     if (sock === s) sock = null;
     wsLive = false;
-    try { s.close(); } catch { /* ya cerrado */ }
+    try { s.close(); } catch {}
     startPoll();
     wsFails++;
     clearTimeout(retryTimer);
     retryTimer = setTimeout(openWs, Math.min(2000 * 2 ** Math.min(wsFails, 5), 60000));
   };
+
   const pinger = setInterval(() => {
     if (Date.now() - lastRx > 25000) return drop();
     try { if (s.readyState === 1) s.send('ping'); } catch { drop(); }
   }, 10000);
 
+  s.onopen = () => {
+    // Autenticación por mensaje (secreto fuera de la URL)
+    try { s.send(JSON.stringify({ t: 'auth', k: pair.secret })); } catch { drop(); }
+  };
+
   s.onmessage = (e) => {
     lastRx = Date.now();
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; } // pong u otro
+    if (data.t === 'auth') {
+      if (data.ok) {
+        if (!wsLive) { wsLive = true; wsFails = 0; stopPoll(); }
+      } else {
+        drop();
+      }
+      return;
+    }
     if (!wsLive) { wsLive = true; wsFails = 0; stopPoll(); }
-    try { handle(JSON.parse(e.data)); } catch { /* "pong" u otro mensaje */ }
+    handle(data);
   };
   s.onclose = drop;
   s.onerror = drop;
@@ -163,7 +210,7 @@ function disconnect() {
   clearTimeout(retryTimer);
   clearTimeout(watchdog);
   stopPoll();
-  if (sock) { const s = sock; sock = null; wsLive = false; try { s.close(); } catch { /* ya cerrado */ } }
+  if (sock) { const s = sock; sock = null; wsLive = false; try { s.close(); } catch {} }
 }
 function reconnect() { disconnect(); wsFails = 0; startPoll(); openWs(); }
 
@@ -181,7 +228,15 @@ async function cmd(c, a = '') {
     return r;
   }
   try {
-    const r = await (await fetch(`${RELAY}/cmd/${pair.id}?k=${pair.secret}&c=${c}&a=${encodeURIComponent(a)}`)).json();
+    const res = await fetch(`${RELAY}/cmd/${pair.id}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${pair.secret}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ c, a })
+    });
+    const r = await res.json();
     say(r.ok ? '' : r.out === 'offline' ? 'Tu PC no está conectado' : r.out === 'timeout' ? 'Tu PC no responde; reconectando…' : r.out);
     setTimeout(poll, 500);
     return r;
@@ -194,9 +249,35 @@ async function cmd(c, a = '') {
 // ---------- estado y reproductor ----------
 function setPlaying(p) {
   playing = p;
-  // `hidden` no es una propiedad de los elementos SVG: hay que usar el atributo.
   $('icPlay').toggleAttribute('hidden', p);
   $('icPause').toggleAttribute('hidden', !p);
+}
+
+function restoreCached() {
+  try {
+    const raw = sessionStorage.getItem('deska_spotify_state');
+    if (raw) {
+      const m = JSON.parse(raw);
+      if (m && m.s) apply(m);
+    }
+  } catch {}
+}
+
+async function loadCover(hash) {
+  if (!pair) return;
+  try {
+    const res = await fetch(`${RELAY}/cover/${pair.id}`, {
+      headers: { Authorization: `Bearer ${pair.secret}` }
+    });
+    if (!res.ok) throw new Error('cover');
+    const blob = await res.blob();
+    if (currentCoverUrl) URL.revokeObjectURL(currentCoverUrl);
+    currentCoverUrl = URL.createObjectURL(blob);
+    $('cover').src = currentCoverUrl;
+  } catch {
+    $('cover').hidden = true;
+    $('coverPh').hidden = false;
+  }
 }
 
 function apply(m) {
@@ -204,6 +285,7 @@ function apply(m) {
   online = m.online === true;
   const s = m.s || { run: false };
   if (online && s.run) {
+    try { sessionStorage.setItem('deska_spotify_state', JSON.stringify(m)); } catch {}
     setPlaying(s.playing);
     pos = s.pos || 0;
     dur = s.dur || 0;
@@ -212,7 +294,7 @@ function apply(m) {
     $('artist').textContent = s.artist || '—';
     if (s.cover && s.cover !== coverKey) {
       coverKey = s.cover;
-      $('cover').src = `${RELAY}/cover/${pair.id}?k=${pair.secret}&h=${s.cover}`;
+      loadCover(s.cover);
     }
     if (Date.now() > volHold && s.vol != null) $('vol').value = s.vol;
     const track = `${s.artist} - ${s.title}`;
@@ -230,7 +312,6 @@ function apply(m) {
 
 const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 
-// La posición llega solo cuando cambia algo; entre medias se avanza con el reloj local.
 function tick() {
   if (seeking) return;
   const now = Math.min(dur || Infinity, pos + (playing ? (Date.now() - posAt) / 1000 : 0));
@@ -242,17 +323,15 @@ function tick() {
   const key = `${state}|${playing}|${Math.round(now / 5)}`;
   if (key !== lastExtras) {
     lastExtras = key;
-    try { deska.extras.set({ state, progress: online && dur ? now / dur : null, control: online ? (playing ? 'pause' : 'play') : null }).catch(() => {}); } catch { /* sin Extras */ }
+    try { deska.extras.set({ state, progress: online && dur ? now / dur : null, control: online ? (playing ? 'pause' : 'play') : null }).catch(() => {}); } catch {}
   }
 }
 setInterval(tick, 250);
-// Con el WebSocket vivo no llegan avisos si tu PC se cae sin cerrar su conexión: se comprueba cada 20 s.
 setInterval(() => { if (wsLive && deska.visible !== false) poll(); }, 20000);
 
 $('cover').onload = () => { $('cover').hidden = false; $('coverPh').hidden = true; };
 $('cover').onerror = () => { $('cover').hidden = true; $('coverPh').hidden = false; };
 
-// Feedback inmediato: animación de pulsación y estado "ocupado" hasta que responde el PC.
 async function press(btn, fn) {
   btn.classList.remove('pop');
   void btn.offsetWidth;
@@ -276,13 +355,14 @@ $('seek').onchange = async () => {
   await cmd('seek', pos.toFixed(1));
 };
 
-// Botón redondo de la fila en Extras: reproduce o pausa.
 deska.on('extras.control', () => { if (online) { setPlaying(!playing); posAt = Date.now(); cmd('toggle'); } });
-// Con el panel oculto se cierra la conexión para no gastar peticiones.
-window.addEventListener('online', () => reconnect()); // volvió el internet
+window.addEventListener('online', () => reconnect());
+try { deska.on('place', (p) => document.body.classList.toggle('is-extras', p === 'extras' || deska.place === 'extras')); } catch {}
 deska.on('visibility', () => { if (deska.visible === false) disconnect(); else reconnect(); });
 
-deska.ready().then(async () => {
+deska.ready().then(async (ctx) => {
+  if (deska.place === 'extras' || ctx?.place === 'extras') document.body.classList.add('is-extras');
+  restoreCached();
   $('ver').textContent = `v${VERSION}`;
   pair = await loadPair();
   renderPair();

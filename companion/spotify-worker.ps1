@@ -117,8 +117,6 @@ function Invoke-Cmd($cmd, $arg) {
     'next'   { Media 'TrySkipNextAsync' 0xB0 }
     'prev'   { Media 'TrySkipPreviousAsync' 0xB1 }
     'seek'   { $s = Get-Session; if ($s) { [void](Await ($s.TryChangePlaybackPositionAsync([long]([double]$arg * 1e7))) ([bool])) } }
-    'play'   { $u = $arg; if ($u -notmatch ':play$') { $u += ':play' }; Start-Process $u }
-    'search' { Start-Process ('spotify:search:' + [uri]::EscapeDataString($arg)) }
     'volume' {
       $p = Get-SpotifyPids
       if (-not $p) { throw 'Spotify no está en ejecución' }

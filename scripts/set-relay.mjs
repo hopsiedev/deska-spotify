@@ -13,7 +13,7 @@ if (!next || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(next)) {
 const cfgPath = path.join(root, 'config/relay.json');
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 const prev = cfg.host;
-const files = ['config/relay.json', 'panel/relay.js', 'panel/panel.json', 'installers/install.ps1', 'installers/install.sh', 'README.md', 'PRIVACY.md'];
+const files = ['config/relay.json', 'panel/relay.js', 'panel/panel.json', 'installers/install.ps1', 'README.md', 'PRIVACY.md'];
 for (const f of files) {
   const p = path.join(root, f);
   if (!fs.existsSync(p)) continue;

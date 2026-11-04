@@ -9,10 +9,11 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(process.env.DESKA_SPOTIFY_CONFIG || path.join(dir, 'config.json'), 'utf8'));
 const dataDir = process.env.DESKA_SPOTIFY_DATA || dir;
 if (!/^[a-z0-9]{16,32}$/.test(cfg.id) || !/^[a-f0-9]{32,64}$/.test(cfg.secret)) throw new Error('config.json: código de emparejamiento no válido');
-const wsUrl = `${cfg.relay.replace(/^http/, 'ws').replace(/\/$/, '')}/ws/c/${cfg.id}?k=${cfg.secret}`;
+const wsUrl = `${cfg.relay.replace(/^http/, 'ws').replace(/\/$/, '')}/ws/c/${cfg.id}`;
 
 const platform = os.platform();
-const { createAdapter } = await import(platform === 'win32' ? './adapters/windows.mjs' : platform === 'darwin' ? './adapters/macos.mjs' : (() => { throw new Error(`Sistema no compatible: ${platform}`); })());
+if (platform !== 'win32') throw new Error(`Sistema no compatible: ${platform}. Esta versión es solo para Windows.`);
+const { createAdapter } = await import('./adapters/windows.mjs');
 const adapter = createAdapter({ dir, dataDir });
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -33,8 +34,9 @@ let lastSent = null;
 let lastSentAt = 0;
 let sentCover = '';
 let busy = false;
+let authed = false;
 
-const send = (obj) => { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(obj)); return true; } return false; };
+const send = (obj) => { if (ws && ws.readyState === 1 && authed) { ws.send(JSON.stringify(obj)); return true; } return false; };
 
 function changed(s) {
   if (!lastSent) return true;
@@ -45,7 +47,7 @@ function changed(s) {
 }
 
 async function pushState(force = false) {
-  if (busy || !ws || ws.readyState !== 1) return;
+  if (busy || !ws || ws.readyState !== 1 || !authed) return;
   busy = true;
   try {
     const s = await adapter.status();
@@ -77,6 +79,7 @@ async function onCommand({ id, c, a }) {
 
 function connect() {
   log('conectando al relé…');
+  authed = false;
   const s = new WebSocket(wsUrl);
   ws = s;
   let lastRx = Date.now();
@@ -88,6 +91,7 @@ function connect() {
   const drop = (why) => {
     if (dropped) return;
     dropped = true;
+    authed = false;
     clearTimeout(connTimer);
     clearInterval(pinger);
     if (ws === s) ws = null;
@@ -100,12 +104,13 @@ function connect() {
 
   s.onopen = () => {
     clearTimeout(connTimer);
-    log('conectado');
+    log('conectado al relé, enviando autenticación…');
     backoff = 1000;
     lastRx = Date.now();
     lastSent = null;
     sentCover = '';
-    pushState(true);
+    // Autenticación por mensaje (secreto fuera de la URL)
+    s.send(JSON.stringify({ t: 'auth', k: cfg.secret }));
     // Latido cada 10 s; si el relé no responde en 30 s la conexión está muerta.
     pinger = setInterval(() => {
       if (Date.now() - lastRx > 30000) return drop('sin respuesta del relé');
@@ -114,7 +119,20 @@ function connect() {
   };
   s.onmessage = (ev) => {
     lastRx = Date.now();
-    try { const m = JSON.parse(String(ev.data)); if (m.t === 'cmd') onCommand(m); } catch { /* "pong" u otro mensaje */ }
+    let m;
+    try { m = JSON.parse(String(ev.data)); } catch { return; } // "pong" u otro mensaje plano
+    if (m.t === 'auth') {
+      if (m.ok) {
+        log('autenticado');
+        authed = true;
+        pushState(true);
+      } else {
+        log('autenticación rechazada por el relé');
+        drop('auth rechazada');
+      }
+      return;
+    }
+    if (m.t === 'cmd') onCommand(m);
   };
   s.onclose = () => drop('cerrado');
   s.onerror = () => drop('error');

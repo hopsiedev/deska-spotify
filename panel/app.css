@@ -47,9 +47,35 @@ button.ic.main svg { width: 22px; height: 22px; }
 .card { background: var(--deska-surface, #1e1f23); border: 1px solid var(--deska-border, #2c2d33); border-radius: var(--deska-radius, 12px); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .card h1 { margin: 0; font-size: 16px; }
 .card p { margin: 0; color: var(--deska-text-secondary, #aaa); line-height: 1.4; }
-.tabs { display: flex; gap: 6px; }
-.tabs button { background: none; color: var(--deska-text, #ececf0); border: 1px solid var(--deska-border, #2c2d33); font-weight: 400; }
-.tabs button.on { background: var(--deska-accent, #1db954); color: var(--deska-on-accent, #000); border-color: transparent; font-weight: 600; }
+
+.notice {
+  padding: 8px 10px;
+  border-radius: var(--deska-radius-small, 6px);
+  background: var(--deska-surface-raised, #2a2b31);
+  border-left: 3px solid var(--deska-accent, #1db954);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--deska-text, #ececf0);
+}
+.uninstall-box {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--deska-border, #2c2d33);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.uninstall-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--deska-text, #ececf0);
+}
+.uninstall-desc {
+  font-size: 11px;
+  color: var(--deska-text-secondary, #aaa);
+  margin: 0;
+}
+
 pre { margin: 0; padding: 8px; border-radius: var(--deska-radius-small, 6px); background: var(--deska-bg, #121214); border: 1px solid var(--deska-border, #2c2d33); font: 11px var(--deska-font-mono, ui-monospace, Consolas, monospace); white-space: pre-wrap; word-break: break-all; user-select: all; }
 .row { display: flex; gap: 6px; flex-wrap: wrap; }
 button.ghost { background: none; color: var(--deska-text, #ececf0); border: 1px solid var(--deska-border, #2c2d33); font-weight: 400; }
@@ -57,3 +83,63 @@ button.ghost { background: none; color: var(--deska-text, #ececf0); border: 1px 
 .wait::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--deska-accent, #1db954); animation: blink 1.2s ease-in-out infinite; }
 @keyframes blink { 50% { opacity: .2; } }
 .ver { margin-top: auto; font-size: 10px; color: var(--deska-text-tertiary, #888); text-align: right; }
+
+/* Adaptación para Extras (popover y tiles) */
+body.is-extras {
+  min-height: auto;
+}
+body.is-extras .ver,
+body.is-extras .gear {
+  display: none !important;
+}
+
+@media (max-height: 150px) {
+  body {
+    padding: 6px 8px;
+    gap: 4px;
+    min-height: auto;
+  }
+  .tl, .vi, #vol, .gear, .ver, .msg {
+    display: none !important;
+  }
+  #player {
+    gap: 4px;
+  }
+  .np {
+    padding: 4px 6px;
+    gap: 8px;
+    border: 0;
+    background: transparent;
+  }
+  .np img, .np .ph {
+    width: 42px;
+    height: 42px;
+  }
+  .title {
+    font-size: 13px;
+  }
+  .artist {
+    font-size: 11px;
+    margin-top: 1px;
+  }
+  .ctl {
+    justify-content: center;
+    gap: 8px;
+  }
+  button.ic {
+    width: 30px;
+    height: 30px;
+  }
+  button.ic svg {
+    width: 14px;
+    height: 14px;
+  }
+  button.ic.main {
+    width: 36px;
+    height: 36px;
+  }
+  button.ic.main svg {
+    width: 18px;
+    height: 18px;
+  }
+}
